@@ -1,0 +1,52 @@
+{
+  "name": "jrelease",
+  "version": "1.0.0",
+  "description": "rewrite of Vercel's release",
+  "main": "index.js",
+  "scripts": {
+    "test": "standard && audit log"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jorgtho/jrelease.git"
+  },
+  "keywords": [
+    "github",
+    "release",
+    "please"
+  ],
+  "author": "jorgtho",
+  "license": "MIT",
+  "bin": {
+    "jrelease": "./bin/jrelease.js"
+  },
+  "bugs": {
+    "url": "https://github.com/jorgtho/jrelease/issues"
+  },
+  "homepage": "https://github.com/jorgtho/jrelease#readme",
+  "devDependencies": {
+    "standard": "^16.0.4"
+  },
+  "dependencies": {
+    "@octokit/auth-oauth-device": "^3.1.2",
+    "args": "^5.0.1",
+    "axios": "^0.26.0",
+    "capitalize": "^2.0.4",
+    "chalk": "^4.1.2",
+    "configstore": "^3.1.5",
+    "escape-goat": "^3.0.0",
+    "fs-extra": "^10.0.0",
+    "git-repo-name": "^1.0.1",
+    "git-spawned-stream": "^1.0.1",
+    "git-state": "^4.1.0",
+    "git-username": "^1.0.0",
+    "github-username": "^6.0.0",
+    "inquirer": "^8.2.0",
+    "node-version": "^2.0.0",
+    "open": "^8.4.0",
+    "ora": "^5.4.1",
+    "semver": "^7.3.5",
+    "tagged-versions": "^1.3.0",
+    "update-check": "^1.5.4"
+  }
+}
