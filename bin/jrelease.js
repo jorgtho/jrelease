@@ -10,9 +10,9 @@ const checkForUpdate = require('update-check')
 
 // Utilities
 const { getRepo, getReleases } = require('../lib/repo')
-const connect = require('../lib/connect')
+const { connect, requestToken } = require('../lib/connect')
 const { fail, create: createSpinner } = require('../lib/spinner')
-const { bumpVersion, getNewVersion } = require('../lib/bump')
+const { bumpVersion } = require('../lib/bump')
 const pkg = require('../package')
 const sleep = require('../lib/sleep')
 const changeTypes = require('../lib/changeTypes')
@@ -102,6 +102,7 @@ const main = async () => {
   try {
     config.repoDetails = await getRepo(config.gitAuth)
   } catch (error) {
+    console.log(error)
     fail(error)
     process.exit(1)
   }
@@ -113,7 +114,7 @@ const main = async () => {
     config.latestRelease = releases.latest
     if (config.flags.previousTag.length === 0) {
       config.tags = await getTags({ previousTag: config.flags.previousTag })
-      if (config.tags.length > 1 && config.latestRelease.tag_name !== config.tags[0].tag) { // Check if latest release tag is older than latest commit tag
+      if (config.tags.length > 1 && config.latestRelease && config.latestRelease.tag_name !== config.tags[0].tag) { // Check if latest release tag is older than latest commit tag
         global.spinner.succeed()
         global.spinner = false
         // const { newVersion } = await getNewVersion(config.bumpType, bumpType[1])
@@ -220,9 +221,30 @@ const main = async () => {
   try {
     config.releaseUrl = await createRelease(config.tags[0], config.existingId, config.commits, config.order, config.gitAuth, config.flags, config.repoDetails)
   } catch (error) {
-    console.log(error.response.data)
-    fail(error)
-    process.exit(1)
+    if (error.response.status === 403) {
+      global.spinner.stop()
+      global.spinner = false
+      console.log(`\n${chalk.red('!')} '${config.repoDetails.user}' has OAuth App access restriction, follow instructions below to give access`)
+      console.log(`\n${chalk.yellow('!')} If '${config.repoDetails.user}' is an organization, remember to grant access to it`)
+      try {
+        config.gitAuth = await requestToken(config.flags.showUrl)
+      } catch (error) {
+        fail(error)
+        process.exit(1)
+      }
+      try {
+        createSpinner('Creating release')
+        config.releaseUrl = await createRelease(config.tags[0], config.existingId, config.commits, config.order, config.gitAuth, config.flags, config.repoDetails)
+      } catch (error) {
+        console.log(error.response)
+        fail(error)
+        process.exit(1)
+      }
+    } else {
+      console.log(error.response)
+      fail(error)
+      process.exit(1)
+    }
   }
   global.spinner.succeed();
   global.spinner = false
