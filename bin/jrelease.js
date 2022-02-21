@@ -23,7 +23,6 @@ const getTags = require('../lib/tags')
 const getCommits = require('../lib/commits')
 const chooseTag = require('../lib/chooseTag')
 
-
 // Throw an error if node version is too low
 if (nodeVersion.major < 6) {
   console.error(`${red('Error!')} Now requires at least version 6 of Node. Please upgrade!`)
@@ -89,7 +88,7 @@ const main = async () => {
       fail('Version type not SemVer-compatible ("major", "minor", "patch")')
     }
   }
-  
+
   createSpinner('Authenticating with github')
   try {
     config.gitAuth = await connect(config.flags.showUrl)
@@ -194,7 +193,7 @@ const main = async () => {
     console.error(`${prefix}: ${releaseURL}`)
     process.exit(1)
   }
-  
+
   createSpinner('Getting commits')
   try {
     config.commits = await getCommits(config.tags)
@@ -202,11 +201,11 @@ const main = async () => {
     fail(error)
     process.exit(1)
   }
-  global.spinner.succeed();
+  global.spinner.succeed()
 
-	// Prevents the spinner from getting succeeded
-	// again once new spinner gets created
-	global.spinner = false;
+  // Prevents the spinner from getting succeeded
+  // again once new spinner gets created
+  global.spinner = false
 
   try {
     config.order = await orderCommits(config.commits, config.tags, config.flags)
@@ -246,12 +245,12 @@ const main = async () => {
       process.exit(1)
     }
   }
-  global.spinner.succeed();
+  global.spinner.succeed()
   global.spinner = false
 
   // Wait for the GitHub UI to render the release
   await sleep(500)
-  
+
   if (!config.flags.showUrl) {
     try {
       open(config.releaseUrl, { wait: false })
