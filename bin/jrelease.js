@@ -19,9 +19,10 @@ const changeTypes = require('../lib/changeTypes')
 const collectChanges = require('../lib/changes')
 const { createRelease, getReleaseURL } = require('../lib/release')
 const orderCommits = require('../lib/orderCommits')
-const getTags = require('../lib/tags')
+const { getTags } = require('../lib/tags')
 const getCommits = require('../lib/commits')
 const chooseTag = require('../lib/chooseTag')
+const listCommits = require('../lib/listCommits')
 
 // Throw an error if node version is too low
 if (nodeVersion.major < 6) {
@@ -65,6 +66,18 @@ const main = async () => {
 
   if (update) {
     console.log(`${chalk.bgRed('UPDATE AVAILABLE')} The latest version of \`jrelease\` is ${update.latest}`)
+  }
+
+  if (config.flags.listCommits) {
+    createSpinner('Getting commits since last release')
+    try {
+      await listCommits(config.flags)
+      process.exit(1)
+    } catch (error) {
+      console.log(error)
+      fail(error)
+      process.exit(1)
+    }
   }
 
   const bumpType = args.sub
