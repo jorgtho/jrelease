@@ -9,55 +9,56 @@ const open = require('open')
 const checkForUpdate = require('update-check')
 
 // Utilities
-const { getRepo, getReleases } = require('../lib/repo')
-const { connect, requestToken } = require('../lib/connect')
 const { fail, create: createSpinner } = require('../lib/spinner')
-const { bumpVersion } = require('../lib/bump')
-const pkg = require('../package')
-const sleep = require('../lib/sleep')
-const changeTypes = require('../lib/changeTypes')
-const collectChanges = require('../lib/changes')
-const { createRelease, getReleaseURL } = require('../lib/release')
-const orderCommits = require('../lib/orderCommits')
-const { getTags } = require('../lib/tags')
-const getCommits = require('../lib/commits')
-const chooseTag = require('../lib/chooseTag')
-const listCommits = require('../lib/listCommits')
+const getBumpType = require('../lib/getBumpType')
+const { connect, requestToken } = require('../lib/connect')
+const { getRepoDetails } = require('../lib/tools/gitConfig')
+const branchSynced = require('../lib/branchSynced')
+const { getReleases } = require('../lib/release')
+const getCommits = require('../lib/getCommits')
+const checkPrevTag = require('../lib/checkPrevTag')
+const checkReleaseBranch = require('../lib/checkReleaseBranch')
+const getSemverTags = require('../lib/getSemverTags')
 
 // Throw an error if node version is too low
-if (nodeVersion.major < 6) {
-  console.error(`${red('Error!')} Now requires at least version 6 of Node. Please upgrade!`)
+if (nodeVersion.major < 8) {
+  console.error(`${red('Error!')} Requires at least version 8 of Node. Please upgrade!`)
   process.exit(1)
 }
 
-// Control of values used here and there
-const config = {
-  flags: false,
-  gitAuth: false,
-  repoDetails: false,
-  tags: false,
-  bumpType: false,
-  bumpVersion: false,
-  releaseRes: false,
-  changes: false,
-  commits: false,
-  existingId: false
+// Throw an error if repo is not up-to-date with remote
+try {
+  if (!branchSynced()) {
+    console.error(`${red('Error!')} Repo is not up-to-date with origin`) // Would you like to commit everything and push to origin??
+    process.exit(1)
+  }
+} catch (error) {
+  console.error(`${red('Error!')} Working dir is not a git repo`)
+  process.exit(1)
 }
 
-args.option('pre', 'Mark the release as prerelease')
-  .option('pre-suffix', 'Provide a suffix for a prerelease, "canary" is used as defualt')
+// Get args
+args.option('pre-suffix', 'Provide a suffix for a prerelease, "canary" is used as default', 'canary')
   .option('publish', 'Instead of creating a draft, publish the release')
   .option(['H', 'hook'], 'Specify a custom file to pipe releases through')
-  .option(['t', 'previous-tag'], 'Specify previous release', '')
+  .option(['t', 'previous-tag'], 'Manually specify previous release', '')
   .option(['u', 'show-url'], 'Show the release URL instead of opening it in the browser')
   .option(['s', 'skip-questions'], 'Skip the questions and create a simple list without the headings')
   .option(['l', 'list-commits'], 'Only lists commits since previous release (does not change anything)')
 
-config.flags = args.parse(process.argv)
+flags = args.parse(process.argv)
 
-// check if pre-release
-if (args.sub[0] === 'pre') {
-  config.flags.pre = true
+// Control of values used here and there
+const control = {
+  flags: args.parse(process.argv),
+  bumpType: args.sub,
+  gitAuth: false,
+  repoDetails: false,
+  tags: false,
+  releases: false,
+  commits: false,
+  changes: false,
+  fromTagHash: false
 }
 
 const main = async () => {
@@ -68,10 +69,11 @@ const main = async () => {
     console.log(`${chalk.bgRed('UPDATE AVAILABLE')} The latest version of \`jrelease\` is ${update.latest}`)
   }
 
-  if (config.flags.listCommits) {
+  // If flag --list-commits, simply list commits since latest release, and finish
+  if (control.flags.listCommits) {
     createSpinner('Getting commits since last release')
     try {
-      await listCommits(config.flags)
+      await listCommits(control.flags) // needs rewrite
       process.exit(1)
     } catch (error) {
       console.log(error)
@@ -80,200 +82,71 @@ const main = async () => {
     }
   }
 
-  const bumpType = args.sub
-  const argAmount = bumpType.length
-
-  if (argAmount === 0) {
-    fail(`No version type specified. Use command "jrelease <SemVerType>". (SemVer-compatible types: "major", "minor", "patch") \n Use ${chalk.yellow('-h')} or ${chalk.yellow('help')} for more options`)
-  }
-
-  if (argAmount === 1 || (bumpType[0] === 'pre' && argAmount === 2)) {
-    const allowedTypes = []
-
-    for (const type of changeTypes) {
-      allowedTypes.push(type.handle)
-    }
-
-    const allowed = allowedTypes.includes(bumpType[0])
-    config.bumpType = bumpType[0]
-
-    if (!allowed) {
-      fail('Version type not SemVer-compatible ("major", "minor", "patch")')
-    }
-  }
-
-  createSpinner('Authenticating with github')
+  // Verify bumpType
   try {
-    config.gitAuth = await connect(config.flags.showUrl)
+    const bumpType = getBumpType(control.bumpType)
+    control.bumpType = bumpType.bumpType
+    control.flags.pre = bumpType.isPre
   } catch (error) {
     fail(error)
-    process.exit(1)
   }
 
-  createSpinner('Fetching repo info')
+  // Authenticate with GitHub
   try {
-    config.repoDetails = await getRepo(config.gitAuth)
+    createSpinner('Authenticating with GitHub')
+    control.gitAuth = await connect()
+  } catch (error) {
+    fail(error)
+  }
+
+  // Get repo details
+  try {
+    createSpinner('Fetching repo details from .git/config')
+    control.repoDetails = await getRepoDetails(`${process.cwd()}/.git/config`)
+  } catch (error) {
+    fail(error)
+  }
+
+  // Get previous releases and tags
+  try {
+    createSpinner('Fetching releases and tags')
+    control.tags = await getSemverTags(control.gitAuth, control.repoDetails)
+    control.releases = await getReleases(control.gitAuth, control.repoDetails)
+  } catch (error) {
+    fail(error)
+  }
+
+  // Check if branch trouble
+  try {
+    createSpinner('Checking release source branch')
+    await checkReleaseBranch(control.releases, control.repoDetails)
+  } catch (error) {
+    fail(error)
+  }
+
+  // Check where to start changelog from
+  try {
+    createSpinner('Checking where to start changelog from')
+    control.fromTagHash = await checkPrevTag(control.releases, control.tags, control.repoDetails)
   } catch (error) {
     console.log(error)
     fail(error)
-    process.exit(1)
   }
 
-  createSpinner('Fetching release info')
-  try {
-    const releases = await getReleases(config.gitAuth, config.repoDetails)
-    config.releaseRes = releases.all
-    config.latestRelease = releases.latest
-    if (config.flags.previousTag.length === 0) {
-      config.tags = await getTags({ previousTag: config.flags.previousTag })
-      if (config.tags.length > 1 && config.latestRelease && config.latestRelease.tag_name !== config.tags[0].tag) { // Check if latest release tag is older than latest commit tag
-        global.spinner.succeed()
-        global.spinner = false
-        // const { newVersion } = await getNewVersion(config.bumpType, bumpType[1])
-        const useReleaseTag = await chooseTag(config.latestRelease.tag_name, config.tags[0].tag) // Ask user to choose which tag to start changelog from
-        if (useReleaseTag) config.flags.previousTag = useReleaseTag // set previuos tag as the latest release tag
-      }
-    }
-  } catch (error) {
-    console.log(error)
-    fail(error)
-    process.exit(1)
-  }
 
-  createSpinner(`Bumping version: ${config.bumpType}`)
+  // Get commits from previous tag
+  /*
   try {
-    config.bumpVersion = await bumpVersion(config.bumpType, config.flags.preSuffix, config.flags.pre)
+    createSpinner('Fetching commits since last release')
+    control.tags = getCommits(control.latestRelease.)
+    control.releases = await getReleases(control.gitAuth, control.repoDetails)
   } catch (error) {
     fail(error)
-    process.exit(1)
-  }
+  } */
 
-  createSpinner('Getting tags')
-  try {
-    config.tags = await getTags({ previousTag: config.flags.previousTag })
-  } catch (error) {
-    fail(error)
-    process.exit(1)
-  }
-
-  createSpinner('Checking if release already exists')
-
-  if (!config.releaseRes) {
-    fail("Couldn't check if release exists.")
-  }
-
-  let existingRelease = null
-  for (const release of config.releaseRes) {
-    if (release.tag_name === config.tags[0].tag) {
-      existingRelease = release
-      config.existingId = existingRelease.id
-      break
-    }
-  }
-
-  if (!existingRelease) {
-    try {
-      config.changes = await collectChanges(config.tags)
-    } catch (error) {
-      fail(error)
-      process.exit(1)
-    }
-  } else if (config.flags.overwrite) {
-    global.spinner.text = 'Overwriting release, because it already exists'
-    try {
-      config.changes = await collectChanges(config.tags, config.existingId)
-    } catch (error) {
-      fail(error)
-      process.exit(1)
-    }
-  } else {
-    global.spinner.succeed()
-    console.log('')
-
-    const releaseURL = getReleaseURL(existingRelease)
-    const prefix = `${chalk.red('Error!')} Release already exists`
-
-    if (!config.flags.showUrl) {
-      try {
-        open(releaseURL, { wait: false })
-        console.error(`${prefix}. Opened in browser...`)
-
-        return
-        // eslint-disable-next-line no-empty
-      } catch (err) {}
-    }
-
-    console.error(`${prefix}: ${releaseURL}`)
-    process.exit(1)
-  }
-
-  createSpinner('Getting commits')
-  try {
-    config.commits = await getCommits(config.tags)
-  } catch (error) {
-    fail(error)
-    process.exit(1)
-  }
-  global.spinner.succeed()
-
-  // Prevents the spinner from getting succeeded
-  // again once new spinner gets created
-  global.spinner = false
-
-  try {
-    config.order = await orderCommits(config.commits, config.tags, config.flags)
-  } catch (error) {
-    fail(error)
-    process.exit(1)
-  }
-  // Update spinner status
-  console.log('')
-
-  createSpinner('Creating release')
-  try {
-    config.releaseUrl = await createRelease(config.tags[0], config.existingId, config.commits, config.order, config.gitAuth, config.flags, config.repoDetails)
-  } catch (error) {
-    if (error.response.status === 403) {
-      global.spinner.stop()
-      global.spinner = false
-      console.log(`\n${chalk.red('!')} '${config.repoDetails.user}' has OAuth App access restriction, follow instructions below to give access`)
-      console.log(`\n${chalk.yellow('!')} If '${config.repoDetails.user}' is an organization, remember to grant access to it`)
-      try {
-        config.gitAuth = await requestToken(config.flags.showUrl)
-      } catch (error) {
-        fail(error)
-        process.exit(1)
-      }
-      try {
-        createSpinner('Creating release')
-        config.releaseUrl = await createRelease(config.tags[0], config.existingId, config.commits, config.order, config.gitAuth, config.flags, config.repoDetails)
-      } catch (error) {
-        console.log(error.response)
-        fail(error)
-        process.exit(1)
-      }
-    } else {
-      console.log(error.response)
-      fail(error)
-      process.exit(1)
-    }
-  }
-  global.spinner.succeed()
-  global.spinner = false
-
-  // Wait for the GitHub UI to render the release
-  await sleep(500)
-
-  if (!config.flags.showUrl) {
-    try {
-      open(config.releaseUrl, { wait: false })
-      console.log(`\n${chalk.bold('Done!')} Opened release in browser...`)
-
-      return
-      // eslint-disable-next-line no-empty
-    } catch (err) {}
-  }
-  console.log(`\n${chalk.bold('Done!')} ${config.releaseUrl}`)
+  if (global.spinner) global.spinner.succeed()
+  console.log(control.fromTagHash)
+  process.exit(1)
 }
 
 // Let the firework start

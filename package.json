@@ -4,7 +4,7 @@
   "description": "rewrite of Vercel's release",
   "main": "index.js",
   "scripts": {
-    "test": "standard && audit log"
+    "test": "jest"
   },
   "repository": {
     "type": "git",
@@ -25,6 +25,7 @@
   },
   "homepage": "https://github.com/jorgtho/jrelease#readme",
   "devDependencies": {
+    "jest": "^27.5.1",
     "standard": "^16.0.4"
   },
   "dependencies": {
@@ -48,5 +49,10 @@
     "semver": "^7.3.5",
     "tagged-versions": "^1.3.0",
     "update-check": "^1.5.4"
+  },
+  "standard": {
+    "env": [
+      "jest"
+    ]
   }
 }

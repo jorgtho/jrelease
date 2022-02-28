@@ -1,0 +1,3 @@
+[remote "origin"]
+	url = https://github.com/mrKrabs/tubularSoda.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
