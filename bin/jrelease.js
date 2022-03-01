@@ -19,6 +19,7 @@ const getCommits = require('../lib/getCommits')
 const checkPrevTag = require('../lib/checkPrevTag')
 const checkReleaseBranch = require('../lib/checkReleaseBranch')
 const getSemverTags = require('../lib/getSemverTags')
+const orderCommits = require('../lib/orderCommits')
 
 // Throw an error if node version is too low
 if (nodeVersion.major < 8) {
@@ -129,23 +130,29 @@ const main = async () => {
     createSpinner('Checking where to start changelog from')
     control.fromTagHash = await checkPrevTag(control.releases, control.tags, control.repoDetails)
   } catch (error) {
-    console.log(error)
+    fail(error)
+  }
+
+  // Get commits from previous tag
+  try {
+    createSpinner('Fetching commits since last release')
+    control.commits = getCommits(control.fromTagHash)
+  } catch (error) {
+    fail(error)
+  }
+
+  // Create changelog (md)
+  try {
+    createSpinner('Creating changelog')
+    control.orderedCommits = await orderCommits(control.commits, control.bumpType)
+    // control.changelog = createChangelog(control.commits)
+  } catch (error) {
     fail(error)
   }
 
 
-  // Get commits from previous tag
-  /*
-  try {
-    createSpinner('Fetching commits since last release')
-    control.tags = getCommits(control.latestRelease.)
-    control.releases = await getReleases(control.gitAuth, control.repoDetails)
-  } catch (error) {
-    fail(error)
-  } */
-
   if (global.spinner) global.spinner.succeed()
-  console.log(control.fromTagHash)
+  console.log(control.orderedCommits)
   process.exit(1)
 }
 
