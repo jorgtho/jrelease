@@ -20,6 +20,7 @@ const checkPrevTag = require('../lib/checkPrevTag')
 const checkReleaseBranch = require('../lib/checkReleaseBranch')
 const getSemverTags = require('../lib/getSemverTags')
 const orderCommits = require('../lib/orderCommits')
+const createChangelog = require('../lib/createChangelog')
 
 // Throw an error if node version is too low
 if (nodeVersion.major < 8) {
@@ -143,16 +144,17 @@ const main = async () => {
 
   // Create changelog (md)
   try {
+    control.orderedCommits = await orderCommits(control.commits, control.bumpType, control.flags)
     createSpinner('Creating changelog')
-    control.orderedCommits = await orderCommits(control.commits, control.bumpType)
-    // control.changelog = createChangelog(control.commits)
+    control.changelog = createChangelog(control.orderedCommits)
   } catch (error) {
+    console.log(error)
     fail(error)
   }
 
 
   if (global.spinner) global.spinner.succeed()
-  console.log(control.orderedCommits)
+  console.log(control.changelog)
   process.exit(1)
 }
 
