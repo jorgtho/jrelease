@@ -8,3 +8,4 @@ rewrite of Vercels release
 - "-l" "--list" is here, simply lists all commits since last release, does not change anything
 - Gives you the option of creating changelog from the latest active release or from the latest commit tag
 - Pre-releases have to be defined as a SemVer-Type (patch, minor, major)
+- Use of annotated tags and "push --follow-tags", instead of git push && git push --tags 

@@ -27,11 +27,11 @@ const faultyInputs = [
 describe('Valid changetypes are returned correct', () => {
   changeTypes.forEach(type => {
     test(`When ${type.handle} is input`, () => {
-      const bumpType = getBumpType([type.handle])
+      const { bumpType } = getBumpType([type.handle])
       expect(bumpType).toBe(type.handle)
     })
     test(`When ${type.handle.toUpperCase()} is input`, () => {
-      const bumpType = getBumpType([type.handle.toUpperCase()])
+      const { bumpType } = getBumpType([type.handle.toUpperCase()])
       expect(bumpType).toBe(type.handle)
     })
   })

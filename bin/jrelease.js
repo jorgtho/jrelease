@@ -1,32 +1,47 @@
 #!/usr/bin/env node
 
-// Packages
+// User feedback
+const chalk = require('chalk')
+console.log(`Starting ${chalk.yellow('jrelease')}, please wait...`)
+
+// Packages and utilities
+const { fail, create: createSpinner } = require('../lib/spinner')
 const nodeVersion = require('node-version')
 const { red } = require('chalk')
-const chalk = require('chalk')
 const args = require('args')
-const open = require('open')
 const checkForUpdate = require('update-check')
-
-// Utilities
-const { fail, create: createSpinner } = require('../lib/spinner')
+const branchSynced = require('../lib/branchSynced')
 const getBumpType = require('../lib/getBumpType')
 const { connect, requestToken } = require('../lib/connect')
+const open = require('open')
 const { getRepoDetails } = require('../lib/tools/gitConfig')
-const branchSynced = require('../lib/branchSynced')
-const { getReleases } = require('../lib/release')
+const { getReleases, createRelease } = require('../lib/release')
 const getCommits = require('../lib/getCommits')
 const checkPrevTag = require('../lib/checkPrevTag')
 const checkReleaseBranch = require('../lib/checkReleaseBranch')
 const getSemverTags = require('../lib/getSemverTags')
 const orderCommits = require('../lib/orderCommits')
 const createChangelog = require('../lib/createChangelog')
+const { bumpAndPush } = require('../lib/bumpAndPush')
+const sleep = require('../lib/sleep')
 
 // Throw an error if node version is too low
 if (nodeVersion.major < 8) {
   console.error(`${red('Error!')} Requires at least version 8 of Node. Please upgrade!`)
   process.exit(1)
 }
+
+// Get args
+args.option('pre-suffix', 'Provide a suffix for a prerelease, "canary" is used as default', 'canary')
+  .option('publish', 'Instead of creating and opening a draft, publish the release')
+  .option(['H', 'hook'], 'Specify a custom file to pipe releases through')
+  .option(['t', 'previous-tag'], 'Manually specify previous release', '')
+  .option(['u', 'show-url'], 'Show the release URL instead of opening it in the browser')
+  .option(['s', 'skip-questions'], 'Skip the questions and create a simple list without the headings')
+  .option(['l', 'list-commits'], 'Only lists commits since previous release (does not change anything)')
+  .option('crlf', 'do not temporarily set core.safecrlf to "false". (If you are not familliar with git config crlf settings, dont worry about this flag')
+
+flags = args.parse(process.argv)
 
 // Throw an error if repo is not up-to-date with remote
 try {
@@ -38,17 +53,6 @@ try {
   console.error(`${red('Error!')} Working dir is not a git repo`)
   process.exit(1)
 }
-
-// Get args
-args.option('pre-suffix', 'Provide a suffix for a prerelease, "canary" is used as default', 'canary')
-  .option('publish', 'Instead of creating a draft, publish the release')
-  .option(['H', 'hook'], 'Specify a custom file to pipe releases through')
-  .option(['t', 'previous-tag'], 'Manually specify previous release', '')
-  .option(['u', 'show-url'], 'Show the release URL instead of opening it in the browser')
-  .option(['s', 'skip-questions'], 'Skip the questions and create a simple list without the headings')
-  .option(['l', 'list-commits'], 'Only lists commits since previous release (does not change anything)')
-
-flags = args.parse(process.argv)
 
 // Control of values used here and there
 const control = {
@@ -71,7 +75,7 @@ const main = async () => {
     console.log(`${chalk.bgRed('UPDATE AVAILABLE')} The latest version of \`jrelease\` is ${update.latest}`)
   }
 
-  // If flag --list-commits, simply list commits since latest release, and finish
+  // TODO If flag --list-commits, simply list commits since latest release, and finish
   if (control.flags.listCommits) {
     createSpinner('Getting commits since last release')
     try {
@@ -129,7 +133,7 @@ const main = async () => {
   // Check where to start changelog from
   try {
     createSpinner('Checking where to start changelog from')
-    control.fromTagHash = await checkPrevTag(control.releases, control.tags, control.repoDetails)
+    control.fromTagHash = await checkPrevTag(control.releases, control.tags.remote, control.repoDetails)
   } catch (error) {
     fail(error)
   }
@@ -146,16 +150,50 @@ const main = async () => {
   try {
     control.orderedCommits = await orderCommits(control.commits, control.bumpType, control.flags)
     createSpinner('Creating changelog')
-    control.changelog = createChangelog(control.orderedCommits)
+    control.changelog = createChangelog(control.orderedCommits, control.fromTagHash)
+  } catch (error) {
+    console.log(error)
+    fail(error)
+  }
+  
+  // Bump and push to remote
+  try {
+    control.bump = bumpAndPush(control.tags, control.bumpType, control.flags)
   } catch (error) {
     console.log(error)
     fail(error)
   }
 
+  // Create release
+  try {
+    control.release = await createRelease(control.gitAuth, control.flags, control.repoDetails, control.bump, control.changelog)
+  } catch (error) {
+    if (error.response.status === 403) { // token does not have access to what it needs to (e.g organization)
+      try {
+        control.gitAuth = await requestToken(true, control.repoDetails) // re-authenticate
+        createSpinner('Creating release')
+        control.release = await createRelease(control.gitAuth, control.flags, control.repoDetails, control.bump, control.changelog)
+      } catch (error) {
+        fail(error)
+      }
+    }
+    fail(error)
+  }
 
   if (global.spinner) global.spinner.succeed()
-  console.log(control.changelog)
-  process.exit(1)
+  global.spinner = false
+
+  try {
+    await sleep(500) // wait for Github to render the release
+    if (!control.flags.showUrl) {
+      open(control.release, {wait: false})
+      console.log(`\n${chalk.bold('Done!')} Opened release in browser...`)
+    } else {
+      console.log(`\n${chalk.bold('Done!')} ${control.release}`)
+    }
+  } catch (error) {
+    fail(error)
+  }
 }
 
 // Let the firework start
