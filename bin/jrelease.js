@@ -5,6 +5,7 @@ const chalk = require('chalk')
 console.log(`Starting ${chalk.yellow('jrelease')}, please wait...`)
 
 // Packages and utilities
+const pkg = require('../package.json')
 const { fail, create: createSpinner } = require('../lib/spinner')
 const nodeVersion = require('node-version')
 const { red } = require('chalk')
@@ -24,6 +25,7 @@ const orderCommits = require('../lib/orderCommits')
 const createChangelog = require('../lib/createChangelog')
 const { bumpAndPush } = require('../lib/bumpAndPush')
 const sleep = require('../lib/sleep')
+const listCommits = require('../lib/listCommits')
 
 // Throw an error if node version is too low
 if (nodeVersion.major < 8) {
@@ -34,18 +36,18 @@ if (nodeVersion.major < 8) {
 // Get args
 args.option('pre-suffix', 'Provide a suffix for a prerelease, "canary" is used as default', 'canary')
   .option('publish', 'Instead of creating and opening a draft, publish the release')
-  .option(['H', 'hook'], 'Specify a custom file to pipe releases through')
   .option(['t', 'previous-tag'], 'Manually specify previous release', '')
   .option(['u', 'show-url'], 'Show the release URL instead of opening it in the browser')
   .option(['s', 'skip-questions'], 'Skip the questions and create a simple list without the headings')
   .option(['l', 'list-commits'], 'Only lists commits since previous release (does not change anything)')
-  .option('crlf', 'do not temporarily set core.safecrlf to "false". (If you are not familliar with git config crlf settings, dont worry about this flag')
+  .option(['c', 'crlf'], 'do not temporarily set core.safecrlf to "false". (If you are not familliar with git config crlf settings, dont worry about this flag)')
+  // .option(['H', 'hook'], 'Specify a custom file to pipe releases through') // not implemented
 
 flags = args.parse(process.argv)
 
 // Throw an error if repo is not up-to-date with remote
 try {
-  if (!branchSynced()) {
+  if (!branchSynced() && !flags.listCommits) { // do not bother if we are only listing commits
     console.error(`${red('Error!')} Repo is not up-to-date with origin`) // Would you like to commit everything and push to origin??
     process.exit(1)
   }
@@ -64,35 +66,26 @@ const control = {
   releases: false,
   commits: false,
   changes: false,
-  fromTagHash: false
+  fromTag: false
 }
 
 const main = async () => {
-  // const update = await checkForUpdate(pkg);
-  const update = false
-
-  if (update) {
-    console.log(`${chalk.bgRed('UPDATE AVAILABLE')} The latest version of \`jrelease\` is ${update.latest}`)
-  }
-
-  // TODO If flag --list-commits, simply list commits since latest release, and finish
-  if (control.flags.listCommits) {
-    createSpinner('Getting commits since last release')
-    try {
-      await listCommits(control.flags) // needs rewrite
-      process.exit(1)
-    } catch (error) {
-      console.log(error)
-      fail(error)
-      process.exit(1)
+  try {
+    const update = await checkForUpdate(pkg)
+    if (update) {
+      console.log(`${chalk.bgRed('UPDATE AVAILABLE')} The latest version of \`jrelease\` is ${update.latest}`)
     }
+  } catch (error) {
+    console.log('Could not check for update')
   }
 
   // Verify bumpType
   try {
-    const bumpType = getBumpType(control.bumpType)
-    control.bumpType = bumpType.bumpType
-    control.flags.pre = bumpType.isPre
+    if (!control.flags.listCommits) { // Do not bother if we are just listing commits
+      const bumpType = getBumpType(control.bumpType)
+      control.bumpType = bumpType.bumpType
+      control.flags.pre = bumpType.isPre
+    }
   } catch (error) {
     fail(error)
   }
@@ -124,8 +117,10 @@ const main = async () => {
 
   // Check if branch trouble
   try {
-    createSpinner('Checking release source branch')
-    await checkReleaseBranch(control.releases, control.repoDetails)
+    if (!control.flags.listCommits) { // Do not bother if we are just listing commits
+      createSpinner('Checking release source branch')
+      await checkReleaseBranch(control.releases, control.repoDetails)
+    }
   } catch (error) {
     fail(error)
   }
@@ -133,7 +128,7 @@ const main = async () => {
   // Check where to start changelog from
   try {
     createSpinner('Checking where to start changelog from')
-    control.fromTagHash = await checkPrevTag(control.releases, control.tags.remote, control.repoDetails)
+    control.fromTag = await checkPrevTag(control.releases, control.tags.remote, control.repoDetails)
   } catch (error) {
     fail(error)
   }
@@ -141,7 +136,16 @@ const main = async () => {
   // Get commits from previous tag
   try {
     createSpinner('Fetching commits since last release')
-    control.commits = getCommits(control.fromTagHash)
+    control.commits = getCommits(control.fromTag.hash)
+  } catch (error) {
+    fail(error)
+  }
+
+  try {
+    if (control.flags.listCommits) {
+      await listCommits(control.commits, control.fromTag.tag)
+      process.exit()
+    }
   } catch (error) {
     fail(error)
   }
@@ -150,7 +154,7 @@ const main = async () => {
   try {
     control.orderedCommits = await orderCommits(control.commits, control.bumpType, control.flags)
     createSpinner('Creating changelog')
-    control.changelog = createChangelog(control.orderedCommits, control.fromTagHash)
+    control.changelog = createChangelog(control.orderedCommits, control.fromTag.hash)
   } catch (error) {
     console.log(error)
     fail(error)
